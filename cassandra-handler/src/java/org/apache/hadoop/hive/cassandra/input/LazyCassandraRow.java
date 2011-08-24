@@ -4,6 +4,14 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
+import org.apache.cassandra.config.ConfigurationException;
+import org.apache.cassandra.db.marshal.CompositeType;
+import org.apache.cassandra.db.marshal.TypeParser;
+import org.apache.cassandra.utils.ByteBufferUtil;
+
 import org.apache.hadoop.hive.cassandra.serde.CassandraLazyFactory;
 import org.apache.hadoop.hive.cassandra.serde.StandardColumnSerDe;
 import org.apache.hadoop.hive.serde2.lazy.ByteArrayRef;
@@ -20,6 +28,8 @@ public class LazyCassandraRow extends LazyStruct {
   private List<String> cassandraColumns;
   private HiveCassandraStandardRowResult rowResult;
   private ArrayList<Object> cachedList;
+
+  private static Log LOG = LogFactory.getLog(LazyCassandraRow.class.getName());
 
   public LazyCassandraRow(LazySimpleStructObjectInspector oi) {
     super(oi);
@@ -85,7 +95,31 @@ public class LazyCassandraRow extends LazyStruct {
         HiveIColumn hiveIColumn = (HiveIColumn) res;
         if (hiveIColumn != null) {
           ref = new ByteArrayRef();
-          ref.setData(hiveIColumn.value().array());
+
+          //TODO: better way to detect this ? What about BinaryLazyStruct ?
+          if (obj instanceof LazyStruct){
+
+              //TODO: Lookup the cass column name in SerDeProperties
+              final CompositeType compositeType ;
+              try {
+                compositeType = (CompositeType)TypeParser.parse("CompositeType(LongType(reversed=true), AsciiType)");
+              } catch (ConfigurationException e) {
+                throw new RuntimeException(e);
+              }
+
+              // need a way to get the str representation for each component.
+              // best I can do for now is get the full str and replace it.
+              String valueStr = compositeType.toString(hiveIColumn.value());
+
+              // Need a way to get the delimeter from the target struct. It's on the
+              // LazySimpleStructObjectInspector
+              byte defaultStructDelim = (byte)2;
+              valueStr = valueStr.replace(':', (char)defaultStructDelim);
+
+              ref.setData(ByteBufferUtil.bytes(valueStr).array());
+          } else {
+            ref.setData(hiveIColumn.value().array());
+          }
         } else {
           return null;
         }

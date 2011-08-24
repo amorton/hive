@@ -1,8 +1,17 @@
 package org.apache.hadoop.hive.cassandra.serde;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+
+import org.apache.commons.lang.StringUtils;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
+
+import org.apache.cassandra.config.ConfigurationException;
+import org.apache.cassandra.db.marshal.*;
 
 import org.apache.hadoop.hive.serde2.ByteStream;
 import org.apache.hadoop.hive.serde2.SerDeUtils;
@@ -19,6 +28,8 @@ import org.apache.hadoop.hive.serde2.objectinspector.primitive.PrimitiveObjectIn
 import org.apache.hadoop.io.Writable;
 
 public abstract class TableMapping {
+  static final Log LOG = LogFactory.getLog(TableMapping.class);
+
   /* names of columns from SerdeParameters */
   protected final List<String> cassandraColumnNames;
   /* index of key column in results */
@@ -183,12 +194,23 @@ public abstract class TableMapping {
         if (list == null) {
           return false;
         } else {
-          for (int i = 0; i < list.size(); i++) {
-            if (i > 0) {
-              serializeStream.write(separator);
-            }
-            serialize(list.get(i), fields.get(i).getFieldObjectInspector(), level + 1);
+          //TODO : multi level structs?
+          //TODO: get the composite type def from SerDeProperties
+          final AbstractType compositeType ;
+          try {
+            compositeType = TypeParser.parse("CompositeType(LongType(reversed=true), AsciiType)");
+          } catch (ConfigurationException e) {
+            throw new RuntimeException(e);
           }
+          // Get the str for for all fields, clean any ":" from them as cassandra will choke.
+          final List<String> cleanedValues = new ArrayList<String>(list.size());
+          for (Object li : list){
+            cleanedValues.add(li.toString().replace(":", "_"));
+          }
+          String valueStr = StringUtils.join(cleanedValues, ":");
+
+          ByteBuffer value = compositeType.fromString(valueStr);
+          serializeStream.write(value.array());
         }
         return true;
       }
